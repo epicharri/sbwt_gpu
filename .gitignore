@@ -1,0 +1,7 @@
+build/search
+parsed100
+querydata100
+slurm*
+.vscode/
+query_data_random/random_queries.fna
+old_subs

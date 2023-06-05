@@ -1,0 +1,115 @@
+#pragma once
+#ifdef __HIP_PLATFORM_HCC__
+#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
+#else
+#include <cuda_runtime.h>
+#endif
+#include "../enums.hpp"
+#include "rank_kernel.hpp"
+
+#define SWAP_TWO_BIT_BLOCKS_OF_UINT32(val) (((val & 0x55555555U) << 1) | ((val & 0xAAAAAAAAU) >> 1))
+typedef uint64_t u64;
+typedef uint32_t u32;
+
+namespace epic
+{
+  namespace gpu
+  {
+
+    __forceinline__ __device__ u32 convert_lex_order(const u64 kmer, u32 m)
+    {
+      u32 m_mer = __brev((u32)(kmer >> (64 - (m * 2U))) << (32 - (m * 2U)));
+      return (((m_mer & 0x55555555U) << 1) | ((m_mer & 0xAAAAAAAAU) >> 1));
+    }
+
+    template <int superblock_size, bool shuffles = false, int rank_version = epic::kind::poppy, bool with_presearch = true>
+    __global__ void search_unified(
+        u64 *kmerstring, u64 *C, u64 **SBWT, u64 **L0, u64 **L12, u64 *node_lefts, u64 *node_rights, u32 kmer_size, u64 *positions_in, /*u64 *results_out,*/ u32 m)
+    {
+
+      u32 idx = blockIdx.x * blockDim.x + threadIdx.x;
+      u64 kmerIndex = positions_in[idx] << 1;
+      u64 kmer =
+          (kmerstring[kmerIndex >> 6] << (kmerIndex & 63U)) | ((kmerstring[(kmerIndex >> 6) + 1ULL] >> (63U - (kmerIndex & 63U))) >> 1);
+      u32 c;
+      u64 node_left, node_right;
+      if (with_presearch)
+      {
+        //        u32 m_mer = convert_lex_order(kmer, m);
+        u32 m_mer = __brev((u32)(kmer >> (64 - (m * 2U))) << (32 - (m * 2U)));
+        m_mer = ((m_mer & 0x55555555U) << 1) | ((m_mer & 0xAAAAAAAAU) >> 1);
+        node_left = node_lefts[m_mer];
+        node_right = node_rights[m_mer];
+      }
+      else
+      {
+        c = (kmer >> 62U) & 0b11U;
+        node_left = C[c];
+        node_right = C[c + 1] - 1ULL;
+        m = 1U;
+      }
+
+      for (u32 i = m; i < kmer_size; i += 1U)
+      {
+        c = (kmer >> (62U - (i << 1))) & 0b11U;
+
+        node_left = C[c] + epic::gpu::rank<superblock_size, shuffles, rank_version>(SBWT[c], L0[c], L12[c], node_left);
+        node_right = C[c] + epic::gpu::rank<superblock_size, shuffles, rank_version>(SBWT[c], L0[c], L12[c], node_right + 1ULL) - 1ULL;
+      }
+      if (node_left > node_right)
+        node_left = ~0ULL;
+
+      // results_out[idx] = node_left;
+      positions_in[idx] = node_left;
+    }
+
+    template <int superblock_size, bool shuffles = false, int rank_version = epic::kind::poppy, bool with_presearch = true>
+    __global__ void search(
+        u64 *kmerstring, u64 *C, u64 **SBWT, u64 **L0, u64 **L12, u64 *node_lefts, u64 *node_rights, u32 kmer_size, u64 *positions_in_and_results_out, u32 m)
+    {
+
+      u32 idx = blockIdx.x * blockDim.x + threadIdx.x;
+      u64 kmerIndex = positions_in_and_results_out[idx] << 1;
+      u64 kmer =
+          (kmerstring[kmerIndex >> 6] << (kmerIndex & 63U)) | ((kmerstring[(kmerIndex >> 6) + 1ULL] >> (63U - (kmerIndex & 63U))) >> 1);
+      u32 c;
+      u64 node_left, node_right;
+      if (with_presearch)
+      {
+        u32 m_mer = kmer >> (64 - (m * 2U));
+        node_left = node_lefts[m_mer];
+        node_right = node_rights[m_mer];
+      }
+      else
+      {
+        c = (kmer >> 62U) & 0b11U;
+        node_left = C[c];
+        node_right = C[c + 1] - 1ULL;
+        m = 1U;
+      }
+
+      if (node_left > node_right || node_left_suffix > node_right_suffix)
+      {
+        node_left = ~0ULL;
+      }
+      else
+
+      {
+        for (u32 i = m; i < kmer_size; i += 1U)
+      {
+        c = (kmer >> (62U - (i << 1))) & 0b11U;
+
+        node_left = C[c] + epic::gpu::rank<superblock_size, shuffles, rank_version>(SBWT[c], L0[c], L12[c], node_left);
+        node_right = C[c] + epic::gpu::rank<superblock_size, shuffles, rank_version>(SBWT[c], L0[c], L12[c], node_right + 1ULL) - 1ULL;
+        node_left = node_left (node_left > node_right)
+      }
+      }
+      if (node_left > node_right)
+        node_left = ~0ULL;
+
+      positions_in_and_results_out[idx] = node_left;
+    }
+
+  }
+}
